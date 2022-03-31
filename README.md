@@ -1,5 +1,10 @@
 # RUI3_nRFCrypto_AES
 
-Sample code demonstrating hardware encoded AES encryption for nRF52840 devices (here specifically RAK4631 using RUI3).
+An RUI3 port of the Adafruit nRFCrypto library, and more specifically of [my fork](https://github.com/Kongduino/Adafruit_nRFCrypto). Since RUI3 is a bare metal platform, without RTOS, the library cannot work as is, so I had to hack things apart, and put them back together. So far I have implemented `nRFCrypto_Random`, an existing class from the library, and `nRFCrypto_AES`, my own addition to the library, which provides hardware-accelerated AES encryption and decryption, ECB, CBC and CTR.
 
-![Screenshot.png](Screenshot.png)
+The sample code demonstrates AES encryption for nRF52840 devices (here specifically RAK4631 using RUI3), while using `nRFCrypto_Random` for the key and IV. I will add `nRFCrypto_Hash` to the example, to round it up with HMAC.
+
+
+
+![Screenshot.png](Screenshot_A.png)
+![Screenshot.png](Screenshot_B.png)
