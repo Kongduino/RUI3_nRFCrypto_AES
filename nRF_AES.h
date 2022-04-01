@@ -1,5 +1,5 @@
-#include "/Users/dda/Library/Arduino15/packages/rak_rui/hardware/nrf52/3.2.0/cores/nRF5/external/nRF5_SDK/nRF5_SDK_17.0.2_d674dde/external/nrf_cc310/include/ssi_aes.h"
-#include "/Users/dda/Library/Arduino15/packages/rak_rui/hardware/nrf52/3.2.0/cores/nRF5/external/nRF5_SDK/nRF5_SDK_17.0.2_d674dde/external/nrf_cc310/include/sns_silib.h"
+#include "ssi_aes.h"
+#include "sns_silib.h"
 
 class nRFCrypto_AES {
   public:
