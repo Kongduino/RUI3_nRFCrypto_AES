@@ -6,7 +6,11 @@ The sample code demonstrates AES encryption for nRF52840 devices (here specifica
 
 TODO: round it up with HMAC.
 
+I cleaned up the code, and added a test of confirmaity for each iteration of the hash tests.
 
 ![Screenshot.png](Screenshot_A.png)
 ![Screenshot.png](Screenshot_B.png)
 ![Screenshot.png](Screenshot_C.png)
+![Screenshot.png](Screenshot_D.png)
+![Screenshot.png](Screenshot_E.png)
+![Screenshot.png](Screenshot_F.png)
