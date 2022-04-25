@@ -1,4 +1,5 @@
 #include <cstring>
+#include "helper.h"
 #include "nRF_AES.h"
 #include "nRF_Random.h"
 #include "nRF_Hash.h"
@@ -6,33 +7,6 @@
 nRFCrypto_AES aes;
 nRFCrypto_Random rnd;
 nRFCrypto_Hash myHash;
-
-void hexDump(unsigned char *buf, uint16_t len) {
-  char alphabet[17] = "0123456789abcdef";
-  Serial.print(F("   +------------------------------------------------+ +----------------+\n"));
-  Serial.print(F("   |.0 .1 .2 .3 .4 .5 .6 .7 .8 .9 .a .b .c .d .e .f | |      ASCII     |\n"));
-  for (uint16_t i = 0; i < len; i += 16) {
-    if (i % 128 == 0)
-      Serial.print(F("   +------------------------------------------------+ +----------------+\n"));
-    char s[] = "|                                                | |                |\n";
-    uint8_t ix = 1, iy = 52;
-    for (uint8_t j = 0; j < 16; j++) {
-      if (i + j < len) {
-        uint8_t c = buf[i + j];
-        s[ix++] = alphabet[(c >> 4) & 0x0F];
-        s[ix++] = alphabet[c & 0x0F];
-        ix++;
-        if (c > 31 && c < 128) s[iy++] = c;
-        else s[iy++] = '.';
-      }
-    }
-    uint8_t index = i / 16;
-    if (i < 256) Serial.write(' ');
-    Serial.print(index, HEX); Serial.write('.');
-    Serial.print(s);
-  }
-  Serial.print(F("   +------------------------------------------------+ +----------------+\n"));
-}
 
 /* Input data for testing
   Same data is stored in input_data.bin file, to verify the result, run hash sum on your PC
@@ -103,14 +77,32 @@ void test_hash(uint32_t mode, const char* modestr) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200, RAK_CUSTOM_MODE);
+  // RAK_CUSTOM_MODE disables AT firmware parsing
   time_t timeout = millis();
   while (!Serial) {
+    // on nRF52840, Serial is not available right away.
+    // make the MCU wait a little
     if ((millis() - timeout) < 5000) {
       delay(100);
     } else {
       break;
     }
+  }
+  uint8_t x = 5;
+  while (x > 0) {
+    Serial.printf("%d, ", x--);
+    delay(500);
+  } // Just for show
+  Serial.println("0!");
+  Serial.println("RAKwireless nRF Crypto");
+  Serial.println("------------------------------------------------------");
+  char HardwareID[16]; // nrf52840
+  strcpy(HardwareID, api.system.chipId.get().c_str());
+  Serial.printf("Hardware ID: %s\r\n", HardwareID);
+  if (strcmp(HardwareID, "nrf52840") != 0) {
+    Serial.printf("Wrong hardware: %s! This is not an nrf52840!", HardwareID);
+    while (1);
   }
   Serial.println("\nnRF AES test");
   Serial.print(" * Lib begin");
@@ -125,7 +117,7 @@ void setup() {
 }
 
 void loop() {
-  char *msg = "Hello user! This is a plain text string!";
+  char *msg = "Hello user! This is a plain text string!        ";
   // please note dear reader – and you should RTFM – that this string's length isn't a multiple of 16.
   // but I am foolish that way.
   uint8_t msgLen = strlen(msg);
@@ -135,35 +127,40 @@ void loop() {
   char decBuf[myLen] = {0}; // Let's make sure we have enough space for the decrypted string
   Serial.println("Plain text:");
   hexDump((unsigned char *)msg, msgLen);
-  uint8_t pKey[16] = {0};
+  uint8_t pKey[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
   uint8_t pKeyLen = 16;
-  rnd.generate(pKey, 16); // use the CC310 to generate 16 random numbers
+  // rnd.generate(pKey, 16); // use the CC310 to generate 16 random numbers
   Serial.println("pKey:");
   hexDump(pKey, 16);
-  uint8_t IV[16] = {0};
-  int rslt = aes.Process(msg, msgLen, IV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ecbMode);
+  uint8_t IV[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x88, 0x88, 0x88, 0x88, 0xc0, 0x00, 0x00, 0x00};
+  uint8_t myIV[16];
+  int rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ecbMode);
   Serial.println("ECB Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
-  rslt = aes.Process(encBuf, rslt, IV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ecbMode);
+  rslt = aes.Process(encBuf, rslt, myIV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ecbMode);
   Serial.println("ECB Decoded:");
   hexDump((unsigned char *)decBuf, rslt);
 
-  rnd.generate(IV, 16); // use the CC310 to generate 16 random numbers
+  // rnd.generate(IV, 16); // use the CC310 to generate 16 random numbers
+  memcpy(myIV, IV, 16);
   Serial.println("IV:");
-  hexDump(IV, 16);
-  rslt = aes.Process(msg, msgLen, IV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.cbcMode);
+  hexDump(myIV, 16);
+  rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.cbcMode);
   Serial.println("CBC Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
-  rslt = aes.Process(encBuf, rslt, IV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.cbcMode);
+  rslt = aes.Process(encBuf, rslt, myIV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.cbcMode);
   Serial.println("CBC Decoded:");
   hexDump((unsigned char *)decBuf, rslt);
 
   // The IV, after all the encryption rounds, should be preserved and communicated
   // to the party that needs to decrypt the cipher
-  rslt = aes.Process(msg, msgLen, IV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ctrMode);
+  memcpy(myIV, IV, 16);
+  Serial.println("IV:");
+  hexDump(myIV, 16);
+  rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ctrMode);
   Serial.println("CTR Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
-  rslt = aes.Process(encBuf, rslt, IV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ctrMode);
+  rslt = aes.Process(encBuf, rslt, myIV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ctrMode);
   Serial.println("CTR Decoded:");
   hexDump((unsigned char *)decBuf, rslt);
 
