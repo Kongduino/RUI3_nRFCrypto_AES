@@ -135,6 +135,10 @@ void loop() {
   uint8_t IV[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x88, 0x88, 0x88, 0x88, 0xc0, 0x00, 0x00, 0x00};
   uint8_t myIV[16];
   int rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ecbMode);
+  if (rslt < 0) {
+    Serial.printf("Error %d Process ECB Encrypt", rslt);
+    while (1);
+  }
   Serial.println("ECB Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
   rslt = aes.Process(encBuf, rslt, myIV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ecbMode);
