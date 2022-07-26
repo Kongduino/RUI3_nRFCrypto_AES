@@ -1,12 +1,37 @@
 #include <cstring>
 #include "helper.h"
 #include "nRF_AES.h"
+#include "nRFCrypto_Chacha.h"
 #include "nRF_Random.h"
 #include "nRF_Hash.h"
+
+long startTime;
+bool rx_done = false;
+double myFreq = 868000000;
+uint16_t sf = 12, bw = 125, cr = 0, preamble = 8, txPower = 22;
+
+void explainError(int, uint8_t);
+
+void recv_cb(rui_lora_p2p_recv_t data) {
+  rx_done = true;
+  if (data.BufferSize == 0) {
+    Serial.println("Empty buffer.");
+    return;
+  }
+  char buff[92];
+  sprintf(buff, "Incoming message, length: %d, RSSI: %d, SNR: %d", data.BufferSize, data.Rssi, data.Snr);
+  Serial.println(buff);
+  hexDump(data.Buffer, data.BufferSize);
+}
+
+void send_cb(void) {
+  Serial.printf("P2P set Rx mode %s\r\n", api.lorawan.precv(65534) ? "Success" : "Fail");
+}
 
 nRFCrypto_AES aes;
 nRFCrypto_Random rnd;
 nRFCrypto_Hash myHash;
+nRFCrypto_Chacha urara;
 
 /* Input data for testing
   Same data is stored in input_data.bin file, to verify the result, run hash sum on your PC
@@ -79,16 +104,7 @@ void test_hash(uint32_t mode, const char* modestr) {
 void setup() {
   Serial.begin(115200, RAK_CUSTOM_MODE);
   // RAK_CUSTOM_MODE disables AT firmware parsing
-  time_t timeout = millis();
-  while (!Serial) {
-    // on nRF52840, Serial is not available right away.
-    // make the MCU wait a little
-    if ((millis() - timeout) < 5000) {
-      delay(100);
-    } else {
-      break;
-    }
-  }
+  delay(5000);
   uint8_t x = 5;
   while (x > 0) {
     Serial.printf("%d, ", x--);
@@ -114,6 +130,25 @@ void setup() {
   Serial.print(" * RND begin");
   rnd.begin();
   Serial.println(" done!");
+
+  startTime = millis();
+  Serial.println("P2P Start");
+  Serial.printf("Hardware ID: %s\r\n", api.system.chipId.get().c_str());
+  Serial.printf("Model ID: %s\r\n", api.system.modelId.get().c_str());
+  Serial.printf("RUI API Version: %s\r\n", api.system.apiVersion.get().c_str());
+  Serial.printf("Firmware Version: %s\r\n", api.system.firmwareVersion.get().c_str());
+  Serial.printf("AT Command Version: %s\r\n", api.system.cliVersion.get().c_str());
+  Serial.printf("Set Node device work mode %s\r\n", api.lorawan.nwm.set(0) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode frequency %3.3f: %s\r\n", (myFreq / 1e6), api.lorawan.pfreq.set(myFreq) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode spreading factor %d: %s\r\n", sf, api.lorawan.psf.set(sf) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode bandwidth %d: %s\r\n", bw, api.lorawan.pbw.set(bw) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode code rate 4/%d: %s\r\n", (cr + 5), api.lorawan.pcr.set(0) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode preamble length %d: %s\r\n", preamble, api.lorawan.ppl.set(8) ? "Success" : "Fail");
+  Serial.printf("Set P2P mode tx power %d: %s\r\n", txPower, api.lorawan.ptp.set(22) ? "Success" : "Fail");
+  api.lorawan.registerPRecvCallback(recv_cb);
+  api.lorawan.registerPSendCallback(send_cb);
+  Serial.printf("P2P set Rx mode %s\r\n", api.lorawan.precv(3000) ? "Success" : "Fail");
+  // let's kick-start things by waiting 3 seconds.
 }
 
 void loop() {
@@ -127,13 +162,18 @@ void loop() {
   char decBuf[myLen] = {0}; // Let's make sure we have enough space for the decrypted string
   Serial.println("Plain text:");
   hexDump((unsigned char *)msg, msgLen);
+
   uint8_t pKey[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
   uint8_t pKeyLen = 16;
-  // rnd.generate(pKey, 16); // use the CC310 to generate 16 random numbers
+  rnd.generate(pKey, 16); // use the CC310 to generate 16 random numbers
   Serial.println("pKey:");
   hexDump(pKey, 16);
+
   uint8_t IV[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x88, 0x88, 0x88, 0x88, 0xc0, 0x00, 0x00, 0x00};
   uint8_t myIV[16];
+  rnd.generate(IV, 16); // use the CC310 to generate 16 random numbers
+  memcpy(myIV, IV, 16);
+
   int rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ecbMode);
   if (rslt < 0) {
     Serial.printf("Error %d Process ECB Encrypt", rslt);
@@ -145,10 +185,11 @@ void loop() {
   Serial.println("ECB Decoded:");
   hexDump((unsigned char *)decBuf, rslt);
 
-  // rnd.generate(IV, 16); // use the CC310 to generate 16 random numbers
   memcpy(myIV, IV, 16);
   Serial.println("IV:");
   hexDump(myIV, 16);
+  memset(encBuf, myLen, myLen);
+  memset(decBuf, myLen, myLen);
   rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.cbcMode);
   Serial.println("CBC Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
@@ -161,12 +202,89 @@ void loop() {
   memcpy(myIV, IV, 16);
   Serial.println("IV:");
   hexDump(myIV, 16);
+  memset(encBuf, myLen, myLen);
+  memset(decBuf, myLen, myLen);
   rslt = aes.Process(msg, msgLen, myIV, pKey, pKeyLen, encBuf, aes.encryptFlag, aes.ctrMode);
   Serial.println("CTR Encoded:");
   hexDump((unsigned char *)encBuf, rslt);
   rslt = aes.Process(encBuf, rslt, myIV, pKey, pKeyLen, decBuf, aes.decryptFlag, aes.ctrMode);
   Serial.println("CTR Decoded:");
   hexDump((unsigned char *)decBuf, rslt);
+
+  // CHACHA
+  uint8_t orgLen = msgLen;
+  msgLen = 64;
+  memset(decBuf, 0, msgLen);
+  memset(encBuf, 0, msgLen);
+  nRFCrypto_Chacha urara; // You need to speak Korean to understand this one ;-)
+  urara.begin();
+  CRYS_CHACHA_Nonce_t pNonce;
+  CRYS_CHACHA_Key_t myKey;
+  uint32_t initialCounter = 0;
+  pKeyLen = 32;
+  // We're going to pass a 44-byte array to the Process function:
+  // The first 32 are the key, the next 12 the nonce.
+  // The Process functions builds the CRYS_CHACHAUserContext_t, CRYS_CHACHA_Nonce_t and CRYS_CHACHA_Key_t objects itself.
+  uint8_t temp[44];
+  rnd.generate(temp, 44);
+  Serial.println("myKey:");
+  hexDump((uint8_t*)temp, pKeyLen);
+  Serial.println("Nonce:");
+  hexDump((uint8_t*)temp + 32, 12);
+
+  // orig = our "plaintext"
+  uint8_t orig[93];
+  // enc = our "plaintext", then encrypted version (in place), then, hopefully the properly decoded version.
+  uint8_t enc[93];
+  rnd.generate(orig, 93);
+
+  // First test with a block smaller than the minimum block size (64)
+  Serial.println("\nOriginal [32]:");
+  memcpy(enc, orig, 32);
+  hexDump(enc, 32);
+  rslt = urara.Process(enc, 32, temp, urara.encryptFlag);
+  Serial.printf(" * rslt = 0x%08x\n", rslt);
+  if (rslt != 0) {
+    explainError(rslt, msgLen);
+    return;
+  } else {
+    Serial.println("Chacha Encoded:");
+    hexDump(enc, 64);
+  }
+  rslt = urara.Process(enc, 32, temp, urara.decryptFlag);
+  Serial.printf(" * rslt = 0x%08x\n", rslt);
+  if (rslt != 0) explainError(rslt, msgLen);
+  else {
+    Serial.println("Chacha Decoded (only the first 32 bytes count):");
+    hexDump(enc, 64);
+    if (memcmp(orig, enc, 32) == 0) Serial.println("Enc/Dec roud-trip successful!");
+    else Serial.println("Enc/Dec roud-trip fail!");
+  }
+
+  // Second test with a block longer than the minimum block size (64)
+  // and not a multiple of 64
+  memcpy(enc, orig, 93);
+  Serial.println("\nOriginal [93]:");
+  hexDump(enc, 93);
+  rslt = urara.Process(enc, 93, temp, urara.encryptFlag);
+  Serial.printf(" * rslt = 0x%08x\n", rslt);
+  if (rslt != 0) {
+    explainError(rslt, msgLen);
+    return;
+  } else {
+    Serial.println("Chacha Encoded:");
+    hexDump(enc, 93);
+  }
+  rslt = urara.Process(enc, 93, temp, urara.decryptFlag);
+  Serial.printf(" * rslt = 0x%08x\n", rslt);
+  if (rslt != 0) explainError(rslt, msgLen);
+  else {
+    Serial.println("Chacha Decoded:");
+    hexDump(enc, 93);
+    if (memcmp(orig, enc, 93) == 0) Serial.println("Enc/Dec roud-trip successful!");
+    else Serial.println("Enc/Dec roud-trip fail!");
+  }
+
 
   test_hash(CRYS_HASH_SHA1_mode, "SHA-1");
   test_hash(CRYS_HASH_SHA224_mode, "SHA-224");
@@ -175,5 +293,7 @@ void loop() {
   // Note: SHA384 and MD5 currently cause hardfault
   // test_hash(CRYS_HASH_SHA384_mode, "SHA384");
   // test_hash(CRYS_HASH_MD5_mode, "MD5");
-  delay(10000);
+  Serial.printf("Try sleep %u ms..", 10000);
+  api.system.sleep.all(10000);
+  Serial.println("Wakeup..");
 }
